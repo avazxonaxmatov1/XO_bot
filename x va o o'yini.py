@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-BOT_TOKEN = "8968950657:AAE..."  # <-- O'zingizning to'liq tokeningizni yozing
+BOT_TOKEN = "8968950657:AAFpx0i43qs6Jr_cpdoDFh1YKJgsFT0oP8g"  # <-- O'zingizning to'liq tokeningizni yozing
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()

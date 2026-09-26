@@ -7,9 +7,14 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
-BOT_TOKEN = "8968950657:AAFpx0i43qs6Jr_cpdoDFh1YKJgsFT0oP8g"  # <-- O'zingizning to'liq tokeningizni yozing
+BOT_TOKEN = "8968950657:AAEthX..."  # <-- Shu yerga o'zingizning TO'LIQ tokeningizni yozing!
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -17,16 +22,15 @@ dp = Dispatcher()
 # Foydalanuvchilar ma'lumotlari
 user_data = {}  # {user_id: {"score": 0, "nickname": "Ism", "vip": False, "shield": 0}}
 vs_bot_games = {}
-pvp_queue = None
-pvp_games = {}
+pvp_queue = []  # Kutish navbatida turganlar ro'yxati
+pvp_games = {}  # Faol PvP o'yinlar
 
 
-# FSM State nikni o'zgartirish uchun
 class NickState(StatesGroup):
     waiting_for_nick = State()
 
 
-# --- RENDER SERVER ---
+# --- RENDER Veb-Server ---
 async def handle(request):
     return web.Response(text="Bot 24/7 rejimda ishlamoqda!")
 
@@ -40,7 +44,7 @@ async def start_server():
     await web.TCPSite(runner, "0.0.0.0", port).start()
 
 
-# --- MINGAN FUNKSIYALAR ---
+# --- YORDAMCHI FUNKSIYALAR ---
 def get_user(user_id, default_name):
     if user_id not in user_data:
         user_data[user_id] = {
@@ -50,6 +54,21 @@ def get_user(user_id, default_name):
             "shield": 0,
         }
     return user_data[user_id]
+
+
+# Ekran pastida doimiy ko'rinib turuvchi klaviatura
+def main_reply_keyboard():
+    kb = [
+        [
+            KeyboardButton(text="👥 Odam bilan o'ynash"),
+            KeyboardButton(text="🤖 Bot bilan o'ynash (+10)"),
+        ],
+        [
+            KeyboardButton(text="👤 Profil va Sozlamalar"),
+            KeyboardButton(text="🛒 Do'kon (Magazin)"),
+        ],
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 
 def get_board_keyboard(board, prefix="pvp"):
@@ -82,33 +101,7 @@ def check_winner(b, mark):
     return any(all(b[i] == mark for i in pos) for pos in win_conditions)
 
 
-# --- MENYU XABARI ---
-def main_menu_keyboard():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="👥 Odam bilan o'ynash", callback_data="play_pvp"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🤖 Bot bilan o'ynash (+10 ball)",
-                    callback_data="play_vs_bot",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="👤 Profil va Sozlamalar", callback_data="my_profile"
-                ),
-                InlineKeyboardButton(
-                    text="🛒 Do'kon (Magazin)", callback_data="shop_menu"
-                ),
-            ],
-        ]
-    )
-
-
+# --- BOSH MENYU (/start) ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     u = get_user(message.from_user.id, message.from_user.first_name)
@@ -116,15 +109,15 @@ async def cmd_start(message: types.Message):
     await message.answer(
         f"Salom, {u['nickname']}{status}!\n"
         f"X va O o'yiniga xush kelibsiz!\n"
-        f"O'yin rejimini tanlang:",
-        reply_markup=main_menu_keyboard(),
+        f"Pastdagi menyudan kerakli bo'limni tanlang 👇",
+        reply_markup=main_reply_keyboard(),
     )
 
 
-# --- PROFIL VA NIKNI O'ZGARTIRISH ---
-@dp.callback_query(F.data == "my_profile")
-async def show_profile(callback: types.CallbackQuery):
-    u = get_user(callback.from_user.id, callback.from_user.first_name)
+# --- PROFIL VA SOZLAMALAR ---
+@dp.message(F.text == "👤 Profil va Sozlamalar")
+async def show_profile(message: types.Message):
+    u = get_user(message.from_user.id, message.from_user.first_name)
     status = "👑 VIP O'yinchi" if u["vip"] else "Oddiy"
 
     kb = InlineKeyboardMarkup(
@@ -133,16 +126,11 @@ async def show_profile(callback: types.CallbackQuery):
                 InlineKeyboardButton(
                     text="✏️ Nikni o'zgartirish", callback_data="change_nick"
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🔙 Bosh menyu", callback_data="back_main"
-                )
-            ],
+            ]
         ]
     )
 
-    await callback.message.edit_text(
+    await message.answer(
         f"👤 **PROFILINGIZ:**\n\n"
         f"✏️ **Nik:** {u['nickname']}\n"
         f"🏆 **Ballar:** {u['score']} ball\n"
@@ -157,14 +145,14 @@ async def show_profile(callback: types.CallbackQuery):
 async def change_nick_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(NickState.waiting_for_nick)
     await callback.message.answer(
-        "Yangi nikingizni yuboring (Masalan: Bot_Qiroli):"
+        "Yangi nikingizni yozib yuboring (Masalan: Bot_Qiroli):"
     )
     await callback.answer()
 
 
 @dp.message(NickState.waiting_for_nick)
 async def process_nick(message: types.Message, state: FSMContext):
-    new_nick = message.text[:20]  # Maksimal 20 harf
+    new_nick = message.text[:20]
     u = get_user(message.from_user.id, message.from_user.first_name)
     u["nickname"] = new_nick
 
@@ -172,14 +160,14 @@ async def process_nick(message: types.Message, state: FSMContext):
     await message.answer(
         f"✅ Nikingiz muvaffaqiyatli o'zgardi: **{new_nick}**",
         parse_mode="Markdown",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_reply_keyboard(),
     )
 
 
-# --- DO'KON (SHOP) MENYUSI ---
-@dp.callback_query(F.data == "shop_menu")
-async def show_shop(callback: types.CallbackQuery):
-    u = get_user(callback.from_user.id, callback.from_user.first_name)
+# --- DO'KON (SHOP) ---
+@dp.message(F.text == "🛒 Do'kon (Magazin)")
+async def show_shop(message: types.Message):
+    u = get_user(message.from_user.id, message.from_user.first_name)
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -195,15 +183,10 @@ async def show_shop(callback: types.CallbackQuery):
                     callback_data="buy_vip",
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    text="🔙 Bosh menyu", callback_data="back_main"
-                )
-            ],
         ]
     )
 
-    await callback.message.edit_text(
+    await message.answer(
         f"🛒 **IMKONIYATLAR DO'KONI**\n\n"
         f"Sizning balingiz: **{u['score']} ball**\n\n"
         f"1. 🛡 **Yutqazmaslik qalqoni**: Yutqazganingizda ballaringiz kamaymaydi.\n"
@@ -222,7 +205,6 @@ async def buy_shield(callback: types.CallbackQuery):
         await callback.answer(
             "🛡 Qalqon muvaffaqiyatli xarid qilindi!", show_alert=True
         )
-        await show_shop(callback)
     else:
         await callback.answer(
             "❌ Mablag' yetarli emas! Sizga 30 ball kerak.", show_alert=True
@@ -242,27 +224,19 @@ async def buy_vip(callback: types.CallbackQuery):
         await callback.answer(
             "👑 Tabriklaymiz, siz VIP bo'ldingiz!", show_alert=True
         )
-        await show_shop(callback)
     else:
         await callback.answer(
             "❌ Mablag' yetarli emas! Sizga 100 ball kerak.", show_alert=True
         )
 
 
-@dp.callback_query(F.data == "back_main")
-async def back_to_main(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        "O'yin rejimini tanlang:", reply_markup=main_menu_keyboard()
-    )
-
-
-# --- BOT BILAN O'YNASH REJIMI ---
-@dp.callback_query(F.data == "play_vs_bot")
-async def start_vs_bot(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
+# --- BOT BILAN O'YNASH ---
+@dp.message(F.text == "🤖 Bot bilan o'ynash (+10)")
+async def start_vs_bot(message: types.Message):
+    user_id = message.from_user.id
     vs_bot_games[user_id] = [" "] * 9
 
-    await callback.message.edit_text(
+    await message.answer(
         "🤖 Bot bilan o'yin boshlandi! Siz **❌** siz, yurishingizni tanlang:",
         parse_mode="Markdown",
         reply_markup=get_board_keyboard(vs_bot_games[user_id], prefix="vsbot"),
@@ -276,7 +250,7 @@ async def process_vs_bot_move(callback: types.CallbackQuery):
 
     if user_id not in vs_bot_games:
         await callback.answer(
-            "O'yin topilmadi, qaytadan /start bosing.", show_alert=True
+            "O'yin topilmadi, qaytadan boshlang.", show_alert=True
         )
         return
 
@@ -320,24 +294,32 @@ async def process_vs_bot_move(callback: types.CallbackQuery):
 
 
 # --- ODAM BILAN O'YNASH (PvP) ---
-@dp.callback_query(F.data == "play_pvp")
-async def start_pvp(callback: types.CallbackQuery):
+@dp.message(F.text == "👥 Odam bilan o'ynash")
+async def start_pvp(message: types.Message):
     global pvp_queue
-    user_id = callback.from_user.id
+    user_id = message.from_user.id
 
-    if pvp_queue == user_id:
-        await callback.answer("Siz allaqachon raqib kutmoqdasiz!", show_alert=True)
+    if user_id in pvp_games:
+        await message.answer(
+            "Sizda faol o'yin mavjud! Avval o'sha o'yinni tugating."
+        )
         return
 
-    if pvp_queue is None:
-        pvp_queue = user_id
-        await callback.message.edit_text(
-            "⏳ Raqib kutilmoqda... Boshqa o'yinchi ham qo'shilishini kuting."
+    if user_id in pvp_queue:
+        await message.answer(
+            "⏳ Siz allaqachon navbatdasiz! Boshqa raqib kirishini kuting..."
+        )
+        return
+
+    pvp_queue.append(user_id)
+
+    if len(pvp_queue) < 2:
+        await message.answer(
+            "⏳ Raqib kutilmoqda... Ikkinchi o'yinchi ulansa o'yin avtomatik boshlanadi."
         )
     else:
-        player1 = pvp_queue
-        player2 = user_id
-        pvp_queue = None
+        player1 = pvp_queue.pop(0)
+        player2 = pvp_queue.pop(0)
 
         game_data = {
             "p1": player1,
@@ -370,7 +352,7 @@ async def process_pvp_move(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     if user_id not in pvp_games:
         await callback.answer(
-            "Faol o'yiningiz yo'q! /start bosing.", show_alert=True
+            "O'yin topilmadi yoki tugagan!", show_alert=True
         )
         return
 
@@ -397,8 +379,11 @@ async def process_pvp_move(callback: types.CallbackQuery):
         await bot.send_message(
             user_id,
             f"🎉 **Siz g'olib bo'ldingiz!** (+15 ball)\nJami ball: {u_win['score']}",
+            parse_mode="Markdown",
         )
-        await bot.send_message(next_player, "💔 **Siz yutqazdingiz.**")
+        await bot.send_message(
+            next_player, "💔 **Siz yutqazdingiz.**", parse_mode="Markdown"
+        )
         del pvp_games[game["p1"]]
         del pvp_games[game["p2"]]
         return
